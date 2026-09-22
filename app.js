@@ -58,7 +58,8 @@ el('range-row').addEventListener('click', (e) => {
   if (!btn) return;
   document.querySelectorAll('.range-btn').forEach((b) => b.classList.remove('selected'));
   btn.classList.add('selected');
-  state.days = Number(btn.dataset.days);
+  state.days = btn.dataset.days === 'all' ? 'all' : Number(btn.dataset.days);
+  el('all-time-hint').hidden = state.days !== 'all';
 });
 
 /* ---------- input parsing ---------- */
@@ -136,11 +137,11 @@ function userAllowed(login, name) {
 }
 
 async function loadRepoActivity(repo, sinceISO) {
-  const sinceMs = new Date(sinceISO).getTime();
+  const sinceMs = sinceISO ? new Date(sinceISO).getTime() : -Infinity;
   const events = []; // {ts, user, type, repo, detail, url}
 
   // --- commits ---
-  const commitUrl = `${API}/repos/${repo}/commits?since=${encodeURIComponent(sinceISO)}&per_page=100`;
+  const commitUrl = `${API}/repos/${repo}/commits?per_page=100${sinceISO ? `&since=${encodeURIComponent(sinceISO)}` : ''}`;
   const commits = await ghPaginate(commitUrl, (page) => page.length < 100);
   for (const c of commits) {
     const login = c.author && c.author.login;
@@ -177,7 +178,7 @@ async function loadRepoActivity(repo, sinceISO) {
   }
 
   // --- issues (excludes PRs; server-side since filter on updated_at) ---
-  const issueUrl = `${API}/repos/${repo}/issues?state=all&since=${encodeURIComponent(sinceISO)}&sort=updated&direction=desc&per_page=100`;
+  const issueUrl = `${API}/repos/${repo}/issues?state=all&sort=updated&direction=desc&per_page=100${sinceISO ? `&since=${encodeURIComponent(sinceISO)}` : ''}`;
   const issues = await ghPaginate(issueUrl, (page) => page.length < 100);
   for (const i of issues) {
     if (i.pull_request) continue; // exclude PRs, handled above
@@ -191,6 +192,8 @@ async function loadRepoActivity(repo, sinceISO) {
   return events;
 }
 
+const TREND_CAP_DAYS = 180; // "All time" still needs a bounded window for the daily trend line
+
 function aggregate(allEvents, days) {
   const byUser = new Map(); // user -> {commit,prOpened,prMerged,issue}
   const byRepo = new Map();
@@ -202,10 +205,26 @@ function aggregate(allEvents, days) {
     map.get(key)[field]++;
   };
 
-  const dateKeys = [];
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
-  for (let i = days - 1; i >= 0; i--) {
+
+  let trendDays = days;
+  let trendCapped = false;
+  if (days === 'all') {
+    const commitTimestamps = allEvents.filter((e) => e.type === 'commit').map((e) => new Date(e.ts).getTime());
+    if (commitTimestamps.length) {
+      const earliest = new Date(Math.min(...commitTimestamps));
+      earliest.setUTCHours(0, 0, 0, 0);
+      const spanDays = Math.round((today - earliest) / 86400000) + 1;
+      trendDays = Math.min(TREND_CAP_DAYS, Math.max(1, spanDays));
+      trendCapped = spanDays > TREND_CAP_DAYS;
+    } else {
+      trendDays = 30;
+    }
+  }
+
+  const dateKeys = [];
+  for (let i = trendDays - 1; i >= 0; i--) {
     const d = new Date(today);
     d.setUTCDate(d.getUTCDate() - i);
     dateKeys.push(d.toISOString().slice(0, 10));
@@ -225,7 +244,7 @@ function aggregate(allEvents, days) {
     }
   }
 
-  return { byUser, byRepo, byUserRepo, byDateUser, dateKeys };
+  return { byUser, byRepo, byUserRepo, byDateUser, dateKeys, trendCapped };
 }
 
 /* ---------- load flow ---------- */
@@ -261,7 +280,7 @@ async function runLoad() {
 
   loadBtn.disabled = true;
   dashboard.hidden = true;
-  const sinceISO = isoDaysAgo(state.days);
+  const sinceISO = state.days === 'all' ? null : isoDaysAgo(state.days);
 
   let allEvents = [];
   const errors = [];
@@ -295,7 +314,8 @@ async function runLoad() {
 
 function render() {
   dashboard.hidden = false;
-  subtitle.textContent = `${state.repos.length} repositor${state.repos.length === 1 ? 'y' : 'ies'} · ${state.users.length ? state.users.length + ' tracked user' + (state.users.length === 1 ? '' : 's') : 'all contributors'} · last ${state.days} days`;
+  const rangeText = state.days === 'all' ? 'all time' : `last ${state.days} days`;
+  subtitle.textContent = `${state.repos.length} repositor${state.repos.length === 1 ? 'y' : 'ies'} · ${state.users.length ? state.users.length + ' tracked user' + (state.users.length === 1 ? '' : 's') : 'all contributors'} · ${rangeText}`;
   renderKPIs();
   renderCommitsChart();
   renderCategoryChart('users-chart', 'users-legend', state.data.byUser, 8);
@@ -375,7 +395,8 @@ function renderCommitsChart() {
   const shown = sortedUsers.slice(0, maxSeries);
   const hasOther = sortedUsers.length > maxSeries;
 
-  el('commits-chart-sub').textContent = `Daily commit count${hasOther ? ` · top ${maxSeries} contributors shown, rest folded into "Other"` : ''}`;
+  const capNote = state.data.trendCapped ? ` · trend limited to the most recent ${dateKeys.length} days of fetched history` : '';
+  el('commits-chart-sub').textContent = `Daily commit count${hasOther ? ` · top ${maxSeries} contributors shown, rest folded into "Other"` : ''}${capNote}`;
 
   if (dateKeys.every((k) => sumMapValues(byDateUser.get(k)) === 0)) {
     container.innerHTML = '<div class="empty-note">No commits in this range.</div>';

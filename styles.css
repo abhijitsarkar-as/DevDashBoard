@@ -156,6 +156,7 @@ textarea:focus, input:focus, button:focus-visible {
 }
 
 .range-row { display: flex; gap: 6px; flex-wrap: wrap; }
+#all-time-hint { display: block; margin-top: 8px; line-height: 1.4; }
 .range-btn {
   background: var(--page-plane);
   border: 1px solid var(--border);
