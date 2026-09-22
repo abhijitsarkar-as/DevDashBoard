@@ -211,7 +211,7 @@ function aggregate(allEvents, days) {
   let trendDays = days;
   let trendCapped = false;
   if (days === 'all') {
-    const commitTimestamps = allEvents.filter((e) => e.type === 'commit').map((e) => new Date(e.ts).getTime());
+    const commitTimestamps = allEvents.filter((e) => e.type === 'commit').map((e) => new Date(e.ts).getTime()).filter((t) => !Number.isNaN(t));
     if (commitTimestamps.length) {
       const earliest = new Date(Math.min(...commitTimestamps));
       earliest.setUTCHours(0, 0, 0, 0);
@@ -635,6 +635,7 @@ function renderFeed() {
 
 function formatRelative(iso) {
   const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
   const diffMs = Date.now() - d.getTime();
   const mins = Math.floor(diffMs / 60000);
   if (mins < 60) return `${Math.max(0, mins)}m ago`;
