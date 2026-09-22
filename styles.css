@@ -195,6 +195,7 @@ textarea:focus, input:focus, button:focus-visible {
 .status.error { color: var(--status-critical); }
 
 .dashboard { display: flex; flex-direction: column; gap: 20px; }
+.dashboard[hidden] { display: none; }
 
 .kpi-row {
   display: grid;

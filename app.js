@@ -316,12 +316,29 @@ function render() {
   dashboard.hidden = false;
   const rangeText = state.days === 'all' ? 'all time' : `last ${state.days} days`;
   subtitle.textContent = `${state.repos.length} repositor${state.repos.length === 1 ? 'y' : 'ies'} · ${state.users.length ? state.users.length + ' tracked user' + (state.users.length === 1 ? '' : 's') : 'all contributors'} · ${rangeText}`;
-  renderKPIs();
-  renderCommitsChart();
-  renderCategoryChart('users-chart', 'users-legend', state.data.byUser, 8);
-  renderCategoryChart('repos-chart', 'repos-legend', state.data.byRepo, 8);
-  renderFeed();
-  renderTotalsTable();
+
+  // Each section renders independently: a bad event in one shouldn't blank the rest of
+  // the dashboard, and a failure is reported with which section broke for debuggability.
+  const sections = [
+    ['KPIs', renderKPIs],
+    ['commits trend', renderCommitsChart],
+    ['activity by user', () => renderCategoryChart('users-chart', 'users-legend', state.data.byUser, 8)],
+    ['activity by repository', () => renderCategoryChart('repos-chart', 'repos-legend', state.data.byRepo, 8)],
+    ['recent activity feed', renderFeed],
+    ['totals table', renderTotalsTable],
+  ];
+  const failures = [];
+  for (const [name, fn] of sections) {
+    try {
+      fn();
+    } catch (e) {
+      console.error(`[dashboard] "${name}" failed to render:`, e);
+      failures.push(`${name} (${e.message})`);
+    }
+  }
+  if (failures.length) {
+    setStatus(`Loaded, but rendering hit a problem in: ${failures.join(', ')}. Open the browser console for details.`, true);
+  }
 }
 
 function sumCounts(counts) {
